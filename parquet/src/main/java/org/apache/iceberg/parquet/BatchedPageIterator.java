@@ -76,19 +76,19 @@ public class BatchedPageIterator {
     private ValuesReader valuesReader = null;
 
 
-    public void setPage(DataPage page) {
+    public void setPage(DataPage page, final ByteBufferInputStream inputStream) {
         Preconditions.checkNotNull(page, "Cannot read from null page");
         this.page = page;
         this.page.accept(new DataPage.Visitor<ValuesReader>() {
             @Override
             public ValuesReader visit(DataPageV1 dataPageV1) {
-                initFromPage(dataPageV1);
+                initFromPage(dataPageV1, inputStream);
                 return null;
             }
 
             @Override
             public ValuesReader visit(DataPageV2 dataPageV2) {
-                initFromPage(dataPageV2);
+                initFromPage(dataPageV2, inputStream);
                 return null;
             }
         });
@@ -546,7 +546,7 @@ public class BatchedPageIterator {
     }
 
 
-    private void initFromPage(DataPageV1 page) {
+    private void initFromPage(DataPageV1 page, ByteBufferInputStream inputStream) {
         this.triplesCount = page.getValueCount();
         ValuesReader rlReader = page.getRlEncoding().getValuesReader(desc, REPETITION_LEVEL);
         ValuesReader dlReader = page.getDlEncoding().getValuesReader(desc, DEFINITION_LEVEL);
@@ -556,27 +556,22 @@ public class BatchedPageIterator {
             BytesInput bytes = page.getBytes();
             LOG.debug("page size {} bytes and {} records", bytes.size(), triplesCount);
             LOG.debug("reading repetition levels at 0");
-            ByteBufferInputStream in = bytes.toInputStream();
-            rlReader.initFromPage(triplesCount, in);
-            LOG.debug("reading definition levels at {}", in.position());
-            dlReader.initFromPage(triplesCount, in);
-            LOG.debug("reading data at {}", in.position());
-            initDataReader(page.getValueEncoding(), in, page.getValueCount());
+            rlReader.initFromPage(triplesCount, inputStream);
+            LOG.debug("reading definition levels at {}", inputStream.position());
+            dlReader.initFromPage(triplesCount, inputStream);
+            LOG.debug("reading data at {}", inputStream.position());
+            initDataReader(page.getValueEncoding(), inputStream, triplesCount);
         } catch (IOException e) {
             throw new ParquetDecodingException("could not read page " + page + " in col " + desc, e);
         }
     }
 
-    private void initFromPage(DataPageV2 page) {
+    private void initFromPage(DataPageV2 page, ByteBufferInputStream inputStream) {
         this.triplesCount = page.getValueCount();
         this.repetitionLevels = newRLEIterator(desc.getMaxRepetitionLevel(), page.getRepetitionLevels());
         this.definitionLevels = newRLEIterator(desc.getMaxDefinitionLevel(), page.getDefinitionLevels());
         LOG.debug("page data size {} bytes and {} records", page.getData().size(), triplesCount);
-        try {
-            initDataReader(page.getDataEncoding(), page.getData().toInputStream(), triplesCount);
-        } catch (IOException e) {
-            throw new ParquetDecodingException("could not read page " + page + " in col " + desc, e);
-        }
+        initDataReader(page.getDataEncoding(), inputStream, triplesCount);
     }
 
     private IntIterator newRLEIterator(int maxLevel, BytesInput bytes) {

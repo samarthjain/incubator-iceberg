@@ -19,6 +19,7 @@
 
 buildscript {
   repositories {
+    mavenLocal()
     jcenter()
     gradlePluginPortal()
     maven { url "http://palantir.bintray.com/releases" }

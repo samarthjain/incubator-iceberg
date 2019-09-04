@@ -122,17 +122,17 @@ public class IcebergSourceFlatParquetDataReadBenchmark extends IcebergSourceFlat
   //   });
   // }
 
-  // @Benchmark
-  // @Threads(1)
-  // public void readFileSourceVectorized() {
-  //   Map<String, String> conf = Maps.newHashMap();
-  //   conf.put(SQLConf.PARQUET_VECTORIZED_READER_ENABLED().key(), "true");
-  //   conf.put(SQLConf.FILES_OPEN_COST_IN_BYTES().key(), Integer.toString(128 * 1024 * 1024));
-  //   withSQLConf(conf, () -> {
-  //     Dataset<Row> df = spark().read().parquet(dataLocation());
-  //     materialize(df);
-  //   });
-  // }
+  @Benchmark
+  @Threads(1)
+  public void readFileSourceVectorized() {
+    Map<String, String> conf = Maps.newHashMap();
+    conf.put(SQLConf.PARQUET_VECTORIZED_READER_ENABLED().key(), "true");
+    conf.put(SQLConf.FILES_OPEN_COST_IN_BYTES().key(), Integer.toString(128 * 1024 * 1024));
+    withSQLConf(conf, () -> {
+      Dataset<Row> df = spark().read().parquet(dataLocation());
+      materialize(df);
+    });
+  }
 
   // @Benchmark
   // @Threads(1)
@@ -237,10 +237,10 @@ public class IcebergSourceFlatParquetDataReadBenchmark extends IcebergSourceFlat
           .withColumn("intCol", expr("CAST(longCol AS INT)"))
           .withColumn("floatCol", expr("CAST(longCol AS FLOAT)"))
           .withColumn("doubleCol", expr("CAST(longCol AS DOUBLE)"))
-          //.withColumn("decimalCol", expr("CAST(longCol AS DECIMAL(20, 5))"))
+          .withColumn("decimalCol", expr("CAST(longCol AS DECIMAL(20, 5))"))
           .withColumn("dateCol", date_add(current_date(), fileNum))
-          .withColumn("timestampCol", expr("TO_TIMESTAMP(dateCol)"));
-          //.withColumn("stringCol", expr("CAST(dateCol AS STRING)"));
+          .withColumn("timestampCol", expr("TO_TIMESTAMP(dateCol)"))
+          .withColumn("stringCol", expr("CAST(dateCol AS STRING)"));
       appendAsFile(df);
     }
   }
