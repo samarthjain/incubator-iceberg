@@ -29,7 +29,7 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.arrow.vectorized.VectorizedArrowReader;
 import org.apache.iceberg.parquet.TypeWithSchemaVisitor;
-import org.apache.iceberg.parquet.vectorized.VectorizedReader;
+import org.apache.iceberg.parquet.VectorizedReader;
 import org.apache.iceberg.spark.arrow.ArrowUtils;
 import org.apache.iceberg.types.Types;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -70,7 +70,6 @@ public class VectorizedSparkParquetReaders {
 
   private static class VectorizedReaderBuilder extends TypeWithSchemaVisitor<VectorizedReader> {
     private final MessageType parquetSchema;
-    private final Schema projectedIcebergSchema;
     private final Schema tableIcebergSchema;
     private final BufferAllocator rootAllocator;
     private final int recordsPerBatch;
@@ -82,7 +81,6 @@ public class VectorizedSparkParquetReaders {
         int recordsPerBatch) {
       this.parquetSchema = parquetSchema;
       this.tableIcebergSchema = tableSchema;
-      this.projectedIcebergSchema = projectedIcebergSchema;
       this.recordsPerBatch = recordsPerBatch;
       this.rootAllocator = ArrowUtils.instance().rootAllocator()
           .newChildAllocator("VectorizedReadBuilder", 0, Long.MAX_VALUE);
@@ -121,17 +119,13 @@ public class VectorizedSparkParquetReaders {
       List<VectorizedReader> reorderedFields = Lists.newArrayListWithExpectedSize(
           icebergFields.size());
 
-      List<Type> types = Lists.newArrayListWithExpectedSize(icebergFields.size());
-
       for (Types.NestedField field : icebergFields) {
         int id = field.fieldId();
         VectorizedReader reader = readersById.get(id);
         if (reader != null) {
           reorderedFields.add(reader);
-          types.add(typesById.get(id));
         } else {
           reorderedFields.add(VectorizedArrowReader.NULL_VALUES_READER);
-          types.add(null);
         }
       }
       return new ColumnarBatchReaders(reorderedFields, recordsPerBatch);

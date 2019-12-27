@@ -35,15 +35,14 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.iceberg.arrow.ArrowSchemaUtil;
 import org.apache.iceberg.arrow.vectorized.parquet.VectorizedColumnIterator;
-import org.apache.iceberg.parquet.ParquetUtil;
-import org.apache.iceberg.parquet.vectorized.VectorizedReader;
+import org.apache.iceberg.parquet.VectorizedReader;
 import org.apache.iceberg.types.Types;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Dictionary;
-import org.apache.parquet.column.page.DictionaryPageReadStore;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.schema.DecimalMetadata;
+import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.PrimitiveType;
 
 /***
@@ -74,9 +73,9 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
   private boolean reuseContainers = true;
   private NullabilityHolder nullabilityHolder;
 
-  // In cases when Parquet employs fall back encoding, we eagerly decode the dictionary encoded data
+  // In cases when Parquet employs fall back to plain encoding, we eagerly decode the dictionary encoded pages
   // before storing the values in the Arrow vector. This means even if the dictionary is present, data
-  // present in the vector may not be dictionary encoded.
+  // present in the vector may not necessarily be dictionary encoded.
   private Dictionary dictionary;
   private boolean allPagesDictEncoded;
 
@@ -93,15 +92,15 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
     this.batchSize = (batchSize == 0) ? DEFAULT_BATCH_SIZE : batchSize;
     this.columnDescriptor = desc;
     this.rootAlloc = ra;
-    this.isFixedLengthDecimal = ParquetUtil.isFixedLengthDecimal(desc);
-    this.isVarWidthType = ParquetUtil.isVarWidthType(desc);
-    this.isFixedWidthBinary = ParquetUtil.isFixedWidthBinary(desc);
-    this.isBooleanType = ParquetUtil.isBooleanType(desc);
-    this.isPaddedDecimal = ParquetUtil.isIntLongBackedDecimal(desc);
-    this.isIntType = ParquetUtil.isIntType(desc);
-    this.isLongType = ParquetUtil.isLongType(desc);
-    this.isFloatType = ParquetUtil.isFloatType(desc);
-    this.isDoubleType = ParquetUtil.isDoubleType(desc);
+    this.isFixedLengthDecimal = isFixedLengthDecimal(desc);
+    this.isVarWidthType = isVarWidthType(desc);
+    this.isFixedWidthBinary = isFixedWidthBinary(desc);
+    this.isBooleanType = isBooleanType(desc);
+    this.isPaddedDecimal = isIntLongBackedDecimal(desc);
+    this.isIntType = isIntType(desc);
+    this.isLongType = isLongType(desc);
+    this.isFloatType = isFloatType(desc);
+    this.isDoubleType = isDoubleType(desc);
     this.vectorizedColumnIterator = new VectorizedColumnIterator(desc, "", batchSize);
   }
 
@@ -124,7 +123,7 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
 
   @SuppressWarnings("checkstyle:CyclomaticComplexity")
   @Override
-  public VectorHolder read() {
+  public VectorHolder read(int numValsToRead) {
     if (vec == null || !reuseContainers) {
       typeWidth = allocateFieldVector();
     }
@@ -165,6 +164,10 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
           vectorizedColumnIterator.nextBatchDoubles(vec, typeWidth, nullabilityHolder);
         }
       }
+    }
+    if (vec.getValueCount() != numValsToRead) {
+      throw new IllegalStateException("Number of values read into the vector, " +
+          vec.getValueCount() + " is not the same as the expected count of " + numValsToRead);
     }
     return new VectorHolder(columnDescriptor, vec, allPagesDictEncoded, dictionary, nullabilityHolder);
   }
@@ -274,12 +277,9 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
   }
 
   @Override
-  public void setRowGroupInfo(
-      PageReadStore source,
-      DictionaryPageReadStore dictionaryPageReadStore,
-      Map<ColumnPath, Boolean> columnDictEncoded) {
+  public void setRowGroupInfo(PageReadStore source, Map<ColumnPath, Boolean> columnDictEncoded) {
     allPagesDictEncoded = columnDictEncoded.get(ColumnPath.get(columnDescriptor.getPath()));
-    dictionary = vectorizedColumnIterator.setRowGroupInfo(source, dictionaryPageReadStore, allPagesDictEncoded);
+    dictionary = vectorizedColumnIterator.setRowGroupInfo(source, allPagesDictEncoded);
   }
 
   @Override
@@ -295,16 +295,78 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
   public static final VectorizedArrowReader NULL_VALUES_READER =
       new VectorizedArrowReader() {
         @Override
-        public VectorHolder read() {
+        public VectorHolder read(int numValsToRead) {
           return VectorHolder.NULL_VECTOR_HOLDER;
         }
 
         @Override
-        public void setRowGroupInfo(
-            PageReadStore source,
-            DictionaryPageReadStore dictionaryPageReadStore,
-            Map<ColumnPath, Boolean> columnDictEncoded) {
+        public void setRowGroupInfo(PageReadStore source, Map<ColumnPath, Boolean> columnDictEncoded) {
         }
       };
+
+  private static boolean isFixedLengthDecimal(ColumnDescriptor desc) {
+    PrimitiveType primitive = desc.getPrimitiveType();
+    return primitive.getOriginalType() != null &&
+        primitive.getOriginalType() == OriginalType.DECIMAL &&
+        (primitive.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY ||
+            primitive.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.BINARY);
+  }
+
+  private static boolean isIntLongBackedDecimal(ColumnDescriptor desc) {
+    PrimitiveType primitive = desc.getPrimitiveType();
+    return primitive.getOriginalType() != null &&
+        primitive.getOriginalType() == OriginalType.DECIMAL &&
+        (primitive.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT64 ||
+            primitive.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT32);
+  }
+
+  private static boolean isVarWidthType(ColumnDescriptor desc) {
+    PrimitiveType primitive = desc.getPrimitiveType();
+    OriginalType originalType = primitive.getOriginalType();
+    if (originalType != null &&
+        originalType != OriginalType.DECIMAL &&
+        (originalType == OriginalType.ENUM ||
+            originalType == OriginalType.JSON ||
+            originalType == OriginalType.UTF8 ||
+            originalType == OriginalType.BSON)) {
+      return true;
+    }
+    if (originalType == null && primitive.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.BINARY) {
+      return true;
+    }
+    return false;
+  }
+
+  private static boolean isBooleanType(ColumnDescriptor desc) {
+    PrimitiveType primitive = desc.getPrimitiveType();
+    OriginalType originalType = primitive.getOriginalType();
+    return originalType == null && primitive.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.BOOLEAN;
+  }
+
+  private static boolean isFixedWidthBinary(ColumnDescriptor desc) {
+    PrimitiveType primitive = desc.getPrimitiveType();
+    OriginalType originalType = primitive.getOriginalType();
+    if (originalType == null &&
+        primitive.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
+      return true;
+    }
+    return false;
+  }
+
+  private static boolean isIntType(ColumnDescriptor desc) {
+    return desc.getPrimitiveType().getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT32;
+  }
+
+  private static boolean isLongType(ColumnDescriptor desc) {
+    return desc.getPrimitiveType().getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT64;
+  }
+
+  private static boolean isDoubleType(ColumnDescriptor desc) {
+    return desc.getPrimitiveType().getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.DOUBLE;
+  }
+
+  private static boolean isFloatType(ColumnDescriptor desc) {
+    return desc.getPrimitiveType().getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.FLOAT;
+  }
 }
 

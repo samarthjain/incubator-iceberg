@@ -120,7 +120,7 @@ public class VectorizedPageIterator {
 
   /**
    * Method for reading a batch of dictionary ids from the dicitonary encoded data pages. Like definition levels,
-   * dictionary ids in Parquet are RLE encoded as well.
+   * dictionary ids in Parquet are RLE/bin-packed encoded as well.
    */
   public int nextBatchDictionaryIds(
       final IntVector vector, final int expectedBatchSize,

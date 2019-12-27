@@ -254,12 +254,15 @@ public class VectorizedReading {
       return Parquet.read(location)
           .project(readSchema)
           .split(task.start(), task.length())
-          .enableBatchedRead()
           .createBatchedReaderFunc(fileSchema -> VectorizedSparkParquetReaders.buildReader(tableSchema, readSchema,
               fileSchema, numRecordsPerBatch))
           .filter(task.residual())
           .caseSensitive(caseSensitive)
           .recordsPerBatch(numRecordsPerBatch)
+          // Spark eagerly consumes the batches so the underlying memory allocated could be reused
+          // without worrying about subsequent reads clobbering over each other. This improves
+          // read performance as every batch read doesn't have to pay the cost of allocating memory.
+          .reuseContainers()
           .build();
     }
   }

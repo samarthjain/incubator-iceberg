@@ -27,7 +27,6 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.page.DataPage;
 import org.apache.parquet.column.page.DictionaryPage;
-import org.apache.parquet.column.page.DictionaryPageReadStore;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.io.ParquetDecodingException;
@@ -54,16 +53,13 @@ public class VectorizedColumnIterator {
     this.vectorizedPageIterator = new VectorizedPageIterator(desc, writerVersion, batchSize);
   }
 
-  public Dictionary setRowGroupInfo(
-      PageReadStore store,
-      DictionaryPageReadStore dictionaryPageReadStore,
-      boolean allPagesDictEncoded) {
+  public Dictionary setRowGroupInfo(PageReadStore store, boolean allPagesDictEncoded) {
     this.columnPageReader = store.getPageReader(desc);
     this.totalValuesCount = columnPageReader.getTotalValueCount();
     this.valuesRead = 0L;
     this.advanceNextPageCount = 0L;
     this.vectorizedPageIterator.reset();
-    Dictionary dict = readDictionaryForColumn(dictionaryPageReadStore);
+    Dictionary dict = readDictionaryForColumn(store);
     this.vectorizedPageIterator.setDictionaryForColumn(dict, allPagesDictEncoded);
     advance();
     return dict;
@@ -248,11 +244,8 @@ public class VectorizedColumnIterator {
   }
 
   private Dictionary readDictionaryForColumn(
-      DictionaryPageReadStore dictionaryPageReadStore) {
-    if (dictionaryPageReadStore == null) {
-      return null;
-    }
-    DictionaryPage dictionaryPage = dictionaryPageReadStore.readDictionaryPage(desc);
+      PageReadStore pageReadStore) {
+    DictionaryPage dictionaryPage = pageReadStore.getPageReader(desc).readDictionaryPage();
     if (dictionaryPage != null) {
       try {
         return dictionaryPage.getEncoding().initDictionary(desc, dictionaryPage);
