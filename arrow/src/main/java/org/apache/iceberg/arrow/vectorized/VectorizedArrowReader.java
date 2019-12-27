@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.arrow.vectorized;
 
+import java.util.HashMap;
 import java.util.Map;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.BigIntVector;
@@ -35,11 +36,14 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.iceberg.arrow.ArrowSchemaUtil;
 import org.apache.iceberg.arrow.vectorized.parquet.VectorizedColumnIterator;
+import org.apache.iceberg.parquet.ParquetUtil;
 import org.apache.iceberg.parquet.VectorizedReader;
 import org.apache.iceberg.types.Types;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Dictionary;
 import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.schema.DecimalMetadata;
 import org.apache.parquet.schema.OriginalType;
@@ -277,8 +281,9 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
   }
 
   @Override
-  public void setRowGroupInfo(PageReadStore source, Map<ColumnPath, Boolean> columnDictEncoded) {
-    allPagesDictEncoded = columnDictEncoded.get(ColumnPath.get(columnDescriptor.getPath()));
+  public void setRowGroupInfo(PageReadStore source, Map<ColumnPath, ColumnChunkMetaData> metadata) {
+    ColumnChunkMetaData chunkMetaData = metadata.get(ColumnPath.get(columnDescriptor.getPath()));
+    allPagesDictEncoded = !ParquetUtil.hasNonDictionaryPages(chunkMetaData);
     dictionary = vectorizedColumnIterator.setRowGroupInfo(source, allPagesDictEncoded);
   }
 
@@ -300,7 +305,7 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
         }
 
         @Override
-        public void setRowGroupInfo(PageReadStore source, Map<ColumnPath, Boolean> columnDictEncoded) {
+        public void setRowGroupInfo(PageReadStore source, Map<ColumnPath, ColumnChunkMetaData> metadata) {
         }
       };
 
@@ -367,6 +372,16 @@ public class VectorizedArrowReader implements VectorizedReader<VectorHolder> {
 
   private static boolean isFloatType(ColumnDescriptor desc) {
     return desc.getPrimitiveType().getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.FLOAT;
+  }
+
+  private static Map<ColumnPath, Boolean> buildColumnDictEncodedMap(BlockMetaData blockMetaData) {
+    Map<ColumnPath, Boolean> map = new HashMap<>();
+    for (ColumnChunkMetaData chunkMetaData : blockMetaData.getColumns()) {
+      ColumnPath path = chunkMetaData.getPath();
+      boolean rowGroupDictEncoded = !ParquetUtil.hasNonDictionaryPages(chunkMetaData);
+      map.merge(path, rowGroupDictEncoded, (previous, value) -> previous && value);
+    }
+    return map;
   }
 }
 

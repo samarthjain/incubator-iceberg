@@ -27,6 +27,7 @@ import org.apache.iceberg.arrow.vectorized.VectorHolder;
 import org.apache.iceberg.arrow.vectorized.VectorizedArrowReader;
 import org.apache.iceberg.parquet.VectorizedReader;
 import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.spark.sql.vectorized.ColumnVector;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
@@ -52,10 +53,10 @@ public class ColumnarBatchReaders implements VectorizedReader<ColumnarBatch> {
   }
 
   @Override
-  public final void setRowGroupInfo(PageReadStore pageStore, Map<ColumnPath, Boolean> columnDictEncoded) {
+  public final void setRowGroupInfo(PageReadStore pageStore, Map<ColumnPath, ColumnChunkMetaData> metaData) {
     for (int i = 0; i < readers.length; i += 1) {
       if (readers[i] != null) {
-        readers[i].setRowGroupInfo(pageStore, columnDictEncoded);
+        readers[i].setRowGroupInfo(pageStore, metaData);
       }
     }
   }
