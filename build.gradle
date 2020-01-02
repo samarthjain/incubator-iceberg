@@ -117,10 +117,6 @@ project(':iceberg-core') {
     compile("org.apache.avro:avro") {
       exclude group: 'org.tukaani' // xz compression is not supported
     }
-    compileOnly("org.apache.spark:spark-hive_2.11") {
-      exclude group: 'org.apache.avro', module: 'avro'
-    }
-
 
     compile "com.fasterxml.jackson.core:jackson-databind"
     compile "com.fasterxml.jackson.core:jackson-core"
@@ -216,7 +212,13 @@ project(':iceberg-parquet') {
     compile project(':iceberg-api')
     compile project(':iceberg-core')
 
-    compile "org.apache.parquet:parquet-avro"
+    compile("org.apache.parquet:parquet-avro") {
+      exclude group: 'org.apache.avro', module: 'avro'
+      // already shaded by Parquet
+      exclude group: 'it.unimi.dsi'
+      exclude group: 'org.codehaus.jackson'
+    }
+
     compileOnly "org.apache.avro:avro"
     compileOnly("org.apache.hadoop:hadoop-client") {
       exclude group: 'org.apache.avro', module: 'avro'
