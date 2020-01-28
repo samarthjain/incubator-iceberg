@@ -74,7 +74,7 @@ public class ColumnarBatchReaders implements VectorizedReader<ColumnarBatch> {
     int numRows = 0;
     for (int i = 0; i < readers.length; i += 1) {
       VectorHolder holder = readers[i].read(numValsToRead);
-      FieldVector vector = holder.getVector();
+      FieldVector vector = holder.vector();
       if (vector == null) {
         arrowColumnVectors[i] = new NullValuesColumnVector(batchSize);
       } else {
@@ -87,4 +87,10 @@ public class ColumnarBatchReaders implements VectorizedReader<ColumnarBatch> {
     return batch;
   }
 
+  @Override
+  public void close() {
+    for (VectorizedReader reader : readers) {
+      reader.close();
+    }
+  }
 }

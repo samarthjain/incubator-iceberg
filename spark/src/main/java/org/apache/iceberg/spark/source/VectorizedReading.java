@@ -22,20 +22,16 @@ package org.apache.iceberg.spark.source;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.SchemaParser;
-import org.apache.iceberg.common.DynMethods;
 import org.apache.iceberg.encryption.EncryptedFiles;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.io.CloseableIterable;
@@ -44,18 +40,12 @@ import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.iceberg.spark.data.vectorized.VectorizedSparkParquetReaders;
-import org.apache.iceberg.types.Types;
-import org.apache.spark.sql.catalyst.InternalRow;
-import org.apache.spark.sql.catalyst.expressions.Attribute;
-import org.apache.spark.sql.catalyst.expressions.AttributeReference;
-import org.apache.spark.sql.catalyst.expressions.UnsafeProjection;
 import org.apache.spark.sql.sources.v2.reader.InputPartition;
 import org.apache.spark.sql.sources.v2.reader.InputPartitionReader;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import scala.collection.JavaConverters;
 
 /**
  * Spark Task reading with Vectorization support
@@ -117,11 +107,6 @@ public class VectorizedReading {
   public static final class TaskDataReader implements InputPartitionReader<ColumnarBatch> {
 
     private static final Logger LOG = LoggerFactory.getLogger(TaskDataReader.class);
-
-    // for some reason, the apply method can't be called from Java without reflection
-    private static final DynMethods.UnboundMethod APPLY_PROJECTION = DynMethods.builder("apply")
-        .impl(UnsafeProjection.class, InternalRow.class)
-        .build();
 
     private final Iterator<FileScanTask> tasks;
     private final Schema tableSchema;
@@ -193,7 +178,6 @@ public class VectorizedReading {
       // schema or rows returned by readers
       Schema finalSchema = expectedSchema;
       PartitionSpec spec = task.spec();
-      Set<Integer> idColumns = spec.identitySourceIds();
 
       // schema needed for the projection and filtering
       StructType sparkType = SparkSchemaUtil.convert(finalSchema);
@@ -223,28 +207,6 @@ public class VectorizedReading {
       }
       this.currentCloseable = iter;
       return iter.iterator();
-    }
-
-    private static UnsafeProjection projection(Schema finalSchema, Schema readSchema) {
-      StructType struct = SparkSchemaUtil.convert(readSchema);
-
-      List<AttributeReference> refs = JavaConverters.seqAsJavaListConverter(struct.toAttributes()).asJava();
-      List<Attribute> attrs = Lists.newArrayListWithExpectedSize(struct.fields().length);
-      List<org.apache.spark.sql.catalyst.expressions.Expression> exprs =
-          Lists.newArrayListWithExpectedSize(struct.fields().length);
-
-      for (AttributeReference ref : refs) {
-        attrs.add(ref.toAttribute());
-      }
-
-      for (Types.NestedField field : finalSchema.columns()) {
-        int indexInReadSchema = struct.fieldIndex(field.name());
-        exprs.add(refs.get(indexInReadSchema));
-      }
-
-      return UnsafeProjection.create(
-          JavaConverters.asScalaBufferConverter(exprs).asScala().toSeq(),
-          JavaConverters.asScalaBufferConverter(attrs).asScala().toSeq());
     }
 
     private CloseableIterable<ColumnarBatch> newParquetIterable(

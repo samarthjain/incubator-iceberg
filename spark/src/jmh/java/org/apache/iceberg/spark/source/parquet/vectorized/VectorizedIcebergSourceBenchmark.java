@@ -103,7 +103,7 @@ public abstract class VectorizedIcebergSourceBenchmark extends IcebergSourceBenc
 
   @Benchmark
   @Threads(1)
-  public void readIcebergVectorized5k() {
+  public void readFileSourceIcebergVectorized5k() {
     Map<String, String> tableProperties = Maps.newHashMap();
     tableProperties.put(SPLIT_OPEN_FILE_COST, Integer.toString(128 * 1024 * 1024));
     withTableProperties(tableProperties, () -> {
@@ -131,10 +131,12 @@ public abstract class VectorizedIcebergSourceBenchmark extends IcebergSourceBenc
 
   @Benchmark
   @Threads(1)
-  public void readFileSourceVectorized() {
+  public void readFileSourceVectorized5k() {
     Map<String, String> conf = Maps.newHashMap();
     conf.put(SQLConf.PARQUET_VECTORIZED_READER_ENABLED().key(), "true");
+    conf.put(SQLConf.PARQUET_VECTORIZED_READER_BATCH_SIZE().key(), "5000");
     conf.put(SQLConf.FILES_OPEN_COST_IN_BYTES().key(), Integer.toString(128 * 1024 * 1024));
+    conf.put(SQLConf.COLUMN_VECTOR_OFFHEAP_ENABLED().key(), "true");
     withSQLConf(conf, () -> {
       Dataset<Row> df = spark().read().parquet(dataLocation());
       materialize(df);

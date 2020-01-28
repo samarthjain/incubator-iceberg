@@ -33,7 +33,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.apache.arrow.vector.ValueVector;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericData.Record;
 import org.apache.iceberg.Schema;
@@ -230,24 +229,23 @@ public class TestHelpers {
     }
   }
 
-  public static void assertArrowVectors(Types.StructType struct, List<Record> expected, ColumnarBatch batch) {
+  public static void assertArrowVectors(Types.StructType struct, List<Record> expected,
+                                        ColumnarBatch batch, int batchNum) {
     List<Types.NestedField> fields = struct.fields();
+    int rowNum = 0;
     for (int r = 0; r < batch.numRows(); r++) {
+      rowNum++;
       Record expRec = expected.get(r);
       InternalRow actualRow = batch.getRow(r);
       for (int i = 0; i < fields.size(); i += 1) {
         ColumnVector vector = batch.column(i);
         Assert.assertTrue(vector instanceof IcebergArrowColumnVector);
-        IcebergArrowColumnVector.ArrowVectorAccessor accessor = ((IcebergArrowColumnVector) vector).getAccessor();
-        ValueVector arrowVector = accessor.getUnderlyingArrowVector();
         Type fieldType = fields.get(i).type();
         Object expectedValue = expRec.get(i);
         if (actualRow.isNullAt(i)) {
-          Assert.assertTrue("Expect null at " + r, expectedValue == null);
-          Assert.assertTrue("Expected the value to be set as null in the arrow vector", arrowVector.isNull(r));
+          Assert.assertNull(expectedValue);
         } else {
           Object actualValue = actualRow.get(i, convert(fieldType));
-          Assert.assertFalse("Expected the value to be set as non-null in the arrow vector", arrowVector.isNull(r));
           assertEqualsUnsafe(fieldType, expectedValue, actualValue);
         }
       }

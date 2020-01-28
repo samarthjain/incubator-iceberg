@@ -62,6 +62,9 @@ public class TestParquetWrite {
   @BeforeClass
   public static void startSpark() {
     TestParquetWrite.spark = SparkSession.builder().master("local[2]").getOrCreate();
+    // Set arrow flags
+    System.setProperty("arrow.enable_unsafe_memory_access", "true");
+    System.setProperty("arrow.enable_null_check_for_get", "false");
   }
 
   @AfterClass

@@ -74,12 +74,14 @@ public class TestSparkParquetVectorizedReader extends AvroDataTest {
   void assertRecordsMatch(Schema schema, List<GenericData.Record> expected, File testFile) throws IOException {
     try (CloseableIterable<ColumnarBatch> batchReader = Parquet.read(Files.localInput(testFile))
         .project(schema)
+        .reuseContainers()
         .createBatchedReaderFunc(type -> VectorizedSparkParquetReaders.buildReader(schema, schema, type, 10000))
         .build()) {
 
       Iterator<ColumnarBatch> batches = batchReader.iterator();
       int numRowsRead = 0;
       int numExpectedRead = 0;
+      int batchNum = 0;
       while (batches.hasNext()) {
 
         ColumnarBatch batch = batches.next();
@@ -89,8 +91,9 @@ public class TestSparkParquetVectorizedReader extends AvroDataTest {
         for (int i = numExpectedRead; i < numExpectedRead + batch.numRows(); i++) {
           expectedBatch.add(expected.get(i));
         }
-        assertArrowVectors(schema.asStruct(), expectedBatch, batch);
+        assertArrowVectors(schema.asStruct(), expectedBatch, batch, batchNum);
         numExpectedRead += batch.numRows();
+        batchNum++;
       }
       Assert.assertEquals(expected.size(), numRowsRead);
     }

@@ -51,15 +51,6 @@ public class VectorizedSparkParquetReaders {
   public static ColumnarBatchReaders buildReader(
       Schema tableSchema,
       Schema expectedSchema,
-      MessageType fileSchema) {
-    return buildReader(tableSchema, expectedSchema, fileSchema,
-        VectorizedArrowReader.DEFAULT_BATCH_SIZE);
-  }
-
-  @SuppressWarnings("unchecked")
-  public static ColumnarBatchReaders buildReader(
-      Schema tableSchema,
-      Schema expectedSchema,
       MessageType fileSchema,
       Integer recordsPerBatch) {
     LOG.info("=> [VectorizedSparkParquetReaders] recordsPerBatch = {}", recordsPerBatch);
@@ -103,14 +94,12 @@ public class VectorizedSparkParquetReaders {
 
       // match the expected struct's order
       Map<Integer, VectorizedReader> readersById = Maps.newHashMap();
-      Map<Integer, Type> typesById = Maps.newHashMap();
       List<Type> fields = struct.getFields();
 
       for (int i = 0; i < fields.size(); i += 1) {
         Type fieldType = fields.get(i);
         int id = fieldType.getId().intValue();
         readersById.put(id, fieldReaders.get(i));
-        typesById.put(id, fieldType);
       }
 
       List<Types.NestedField> icebergFields = expected != null ?
@@ -139,8 +128,13 @@ public class VectorizedSparkParquetReaders {
       // Create arrow vector for this field
       int parquetFieldId = primitive.getId().intValue();
       ColumnDescriptor desc = parquetSchema.getColumnDescription(currentPath());
+      // Nested types not yet supported for vectorized reads
+      if (desc.getMaxRepetitionLevel() > 0) {
+        return null;
+      }
       Types.NestedField icebergField = tableIcebergSchema.findField(parquetFieldId);
-      return new VectorizedArrowReader(desc, icebergField, rootAllocator, recordsPerBatch);
+      return new VectorizedArrowReader(desc, icebergField, rootAllocator,
+          recordsPerBatch, /* setArrowValidityVector */ false);
     }
 
     private String[] currentPath() {

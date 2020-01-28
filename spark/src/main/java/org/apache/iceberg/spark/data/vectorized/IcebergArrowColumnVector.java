@@ -36,9 +36,7 @@ import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.holders.NullableVarCharHolder;
-import org.apache.iceberg.arrow.vectorized.IcebergDecimalArrowVector;
-import org.apache.iceberg.arrow.vectorized.IcebergVarBinaryArrowVector;
-import org.apache.iceberg.arrow.vectorized.IcebergVarcharArrowVector;
+import org.apache.iceberg.arrow.vectorized.IcebergArrowVectors;
 import org.apache.iceberg.arrow.vectorized.NullabilityHolder;
 import org.apache.iceberg.arrow.vectorized.VectorHolder;
 import org.apache.iceberg.spark.arrow.ArrowUtils;
@@ -56,32 +54,27 @@ import org.apache.spark.sql.vectorized.ColumnarMap;
 import org.apache.spark.unsafe.types.UTF8String;
 
 /**
- * Implementation of Spark's {@link ColumnVector} interface. The main purpose of this class is to prevent the expensive
- * nullability checks made by Spark's {@link ArrowColumnVector} implementation by delegating those calls to the
- * Iceberg's {@link NullabilityHolder}.
+ * Implementation of Spark's {@link ColumnVector} interface. The code for this
+ * class is heavily inspired from Spark's {@link ArrowColumnVector}
+ * The main difference is in how nullability checks are made in this
+ * class by relying on {@link NullabilityHolder} instead of the validity vector
+ * in the Arrow vector.
  */
 
 public class IcebergArrowColumnVector extends ColumnVector {
 
   private final ArrowVectorAccessor accessor;
   private final NullabilityHolder nullabilityHolder;
-  private final ColumnDescriptor columnDescriptor;
   private final Dictionary dictionary;
   private final boolean isVectorDictEncoded;
   private ArrowColumnVector[] childColumns;
 
   public IcebergArrowColumnVector(VectorHolder holder) {
-    super(ArrowUtils.instance().fromArrowField(holder.getVector().getField()));
-    this.nullabilityHolder = holder.getNullabilityHolder();
-    this.columnDescriptor = holder.getDescriptor();
-    this.dictionary = holder.getDictionary();
+    super(ArrowUtils.instance().fromArrowField(holder.vector().getField()));
+    this.nullabilityHolder = holder.nullabilityHolder();
+    this.dictionary = holder.dictionary();
     this.isVectorDictEncoded = holder.isDictionaryEncoded();
-    this.accessor = getVectorAccessor(columnDescriptor, holder.getVector());
-  }
-
-  // public for testing purposes only
-  public ArrowVectorAccessor getAccessor() {
-    return accessor;
+    this.accessor = getVectorAccessor(holder.descriptor(), holder.vector());
   }
 
   @Override
@@ -108,7 +101,7 @@ public class IcebergArrowColumnVector extends ColumnVector {
 
   @Override
   public boolean isNullAt(int rowId) {
-    return nullabilityHolder.isNullAt(rowId);
+    return nullabilityHolder.isNullAt(rowId) == 1;
   }
 
   @Override
@@ -197,9 +190,8 @@ public class IcebergArrowColumnVector extends ColumnVector {
       this.vector = vector;
     }
 
-    // TODO: should be final after removing ArrayAccessor workaround
-    boolean isNullAt(int rowId) {
-      return nullabilityHolder.isNullAt(rowId);
+    final boolean isNullAt(int rowId) {
+      return nullabilityHolder.isNullAt(rowId) == 1;
     }
 
     final void close() {
@@ -248,11 +240,6 @@ public class IcebergArrowColumnVector extends ColumnVector {
 
     ColumnarArray getArray(int rowId) {
       throw new UnsupportedOperationException();
-    }
-
-    // public for testing purposes only
-    public ValueVector getUnderlyingArrowVector() {
-      return vector;
     }
   }
 
@@ -313,10 +300,6 @@ public class IcebergArrowColumnVector extends ColumnVector {
             return new DictionaryIntAccessor((IntVector) vector);
           case FLOAT:
             return new DictionaryFloatAccessor((IntVector) vector);
-          //        case BOOLEAN:
-          //          this.vec = ArrowSchemaUtil.convert(icebergField).createVector(rootAlloc);
-          //          ((BitVector) vec).allocateNew(batchSize);
-          //          return UNKNOWN_WIDTH;
           case INT64:
             return new DictionaryLongAccessor((IntVector) vector);
           case DOUBLE:
@@ -340,12 +323,12 @@ public class IcebergArrowColumnVector extends ColumnVector {
         return new FloatAccessor((Float4Vector) vector);
       } else if (vector instanceof Float8Vector) {
         return new DoubleAccessor((Float8Vector) vector);
-      } else if (vector instanceof IcebergDecimalArrowVector) {
-        return new DecimalAccessor((IcebergDecimalArrowVector) vector);
-      } else if (vector instanceof IcebergVarcharArrowVector) {
-        return new StringAccessor((IcebergVarcharArrowVector) vector);
-      } else if (vector instanceof IcebergVarBinaryArrowVector) {
-        return new BinaryAccessor((IcebergVarBinaryArrowVector) vector);
+      } else if (vector instanceof IcebergArrowVectors.DecimalArrowVector) {
+        return new DecimalAccessor((IcebergArrowVectors.DecimalArrowVector) vector);
+      } else if (vector instanceof IcebergArrowVectors.VarcharArrowVector) {
+        return new StringAccessor((IcebergArrowVectors.VarcharArrowVector) vector);
+      } else if (vector instanceof IcebergArrowVectors.VarBinaryArrowVector) {
+        return new BinaryAccessor((IcebergArrowVectors.VarBinaryArrowVector) vector);
       } else if (vector instanceof DateDayVector) {
         return new DateAccessor((DateDayVector) vector);
       } else if (vector instanceof TimeStampMicroTZVector) {
@@ -533,9 +516,9 @@ public class IcebergArrowColumnVector extends ColumnVector {
 
   private class DecimalAccessor extends ArrowVectorAccessor {
 
-    private final IcebergDecimalArrowVector vector;
+    private final IcebergArrowVectors.DecimalArrowVector vector;
 
-    DecimalAccessor(IcebergDecimalArrowVector vector) {
+    DecimalAccessor(IcebergArrowVectors.DecimalArrowVector vector) {
       super(vector);
       this.vector = vector;
     }
@@ -551,10 +534,10 @@ public class IcebergArrowColumnVector extends ColumnVector {
 
   private class StringAccessor extends ArrowVectorAccessor {
 
-    private final IcebergVarcharArrowVector vector;
+    private final IcebergArrowVectors.VarcharArrowVector vector;
     private final NullableVarCharHolder stringResult = new NullableVarCharHolder();
 
-    StringAccessor(IcebergVarcharArrowVector vector) {
+    StringAccessor(IcebergArrowVectors.VarcharArrowVector vector) {
       super(vector);
       this.vector = vector;
     }
@@ -689,16 +672,6 @@ public class IcebergArrowColumnVector extends ColumnVector {
       super(vector);
       this.vector = vector;
       this.arrayData = new ArrowColumnVector(vector.getDataVector());
-    }
-
-    @Override
-    final boolean isNullAt(int rowId) {
-      // TODO: Workaround if vector has all non-null values, see ARROW-1948
-      if (vector.getValueCount() > 0 && vector.getValidityBuffer().capacity() == 0) {
-        return false;
-      } else {
-        return super.isNullAt(rowId);
-      }
     }
 
     @Override

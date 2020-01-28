@@ -124,7 +124,7 @@ class Reader implements DataSourceReader,
   private Schema schema;
   private StructType type = null; // cached because Spark accesses it multiple times
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
-  private Boolean enableBatchedReads = null; // cache variable for enabling batched reads
+  private Boolean enableBatchRead = null; // cache variable for enabling batched reads
 
   Reader(Table table, Broadcast<FileIO> io, Broadcast<EncryptionManager> encryptionManager,
          boolean caseSensitive, DataSourceOptions options) {
@@ -134,17 +134,14 @@ class Reader implements DataSourceReader,
 
     // override logic to check when batched reads is enabled by turning off batched reads
     boolean disableBatchedReads =
-        options.get("iceberg.read.disablebatchedreads").map(Boolean::parseBoolean).orElse(false);
+        options.get("iceberg.read.disablevectorizedreads").map(Boolean::parseBoolean).orElse(false);
     if (disableBatchedReads) {
-      enableBatchedReads = Boolean.FALSE;
+      enableBatchRead = Boolean.FALSE;
     }
     Optional<String> numRecordsPerBatchOpt = options.get("iceberg.read.numrecordsperbatch");
     if (numRecordsPerBatchOpt.isPresent()) {
-
       this.numRecordsPerBatch = Integer.parseInt(numRecordsPerBatchOpt.get());
-
     } else {
-
       this.numRecordsPerBatch = VectorizedArrowReader.DEFAULT_BATCH_SIZE;
     }
     if (snapshotId != null && asOfTimestamp != null) {
@@ -192,6 +189,7 @@ class Reader implements DataSourceReader,
    */
   @Override
   public List<InputPartition<ColumnarBatch>> planBatchInputPartitions() {
+    Preconditions.checkState(enableBatchRead != null && enableBatchRead, "Batched reads not enabled");
     String tableSchemaString = SchemaParser.toJson(table.schema());
     String expectedSchemaString = SchemaParser.toJson(lazySchema());
 
@@ -282,10 +280,10 @@ class Reader implements DataSourceReader,
 
   @Override
   public boolean enableBatchRead() {
-    return lazyCheckEnabledBatchedReads();
+    return lazyCheckEnableBatchRead();
   }
 
-  private boolean lazyCheckEnabledBatchedReads() {
+  private boolean lazyCheckEnableBatchRead() {
     boolean allParquetFiles =
         tasks().stream()
             .allMatch(combinedScanTask -> combinedScanTask.files()
@@ -293,12 +291,12 @@ class Reader implements DataSourceReader,
                 .allMatch(fileScanTask -> fileScanTask.file().format().equals(
                     FileFormat.PARQUET)));
     if (!allParquetFiles) {
-      this.enableBatchedReads = false;
+      this.enableBatchRead = false;
       return false;
     }
     int numColumns = lazySchema().columns().size();
     if (numColumns == 0) {
-      this.enableBatchedReads = false;
+      this.enableBatchRead = false;
       return false;
     }
     boolean projectIdentityPartitionColumn =
@@ -307,14 +305,14 @@ class Reader implements DataSourceReader,
                 .stream()
                 .anyMatch(fileScanTask -> !fileScanTask.spec().identitySourceIds().isEmpty()));
     if (projectIdentityPartitionColumn) {
-      this.enableBatchedReads = false;
+      this.enableBatchRead = false;
       return false;
     }
-    if (enableBatchedReads == null) {
+    if (enableBatchRead == null) {
       // Enable batched reads only if all requested columns are primitive otherwise revert to row-based reads
-      this.enableBatchedReads = lazySchema().columns().stream().allMatch(c -> c.type().isPrimitiveType());
+      this.enableBatchRead = lazySchema().columns().stream().allMatch(c -> c.type().isPrimitiveType());
     }
-    return enableBatchedReads;
+    return enableBatchRead;
   }
 
   private List<CombinedScanTask> tasks() {
