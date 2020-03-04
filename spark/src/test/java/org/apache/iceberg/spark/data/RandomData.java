@@ -103,6 +103,22 @@ public class RandomData {
     };
   }
 
+  public static List<Record> generateListWithFallBackDictionaryEncodingForStrings(
+          Schema schema,
+          int numRecords,
+          long seed,
+          float fraction) {
+    FallbackDictionaryEncodedDataGenerator generator =
+            new FallbackDictionaryEncodedDataGenerator(schema, seed, numRecords, fraction);
+    List<Record> records = Lists.newArrayListWithExpectedSize(numRecords);
+    for (int i = 0; i < numRecords; i += 1) {
+      Record rec = (Record) TypeUtil.visit(schema, generator);
+      records.add(rec);
+    }
+
+    return records;
+  }
+
   private static class RandomDataGenerator extends TypeUtil.CustomOrderSchemaVisitor<Object> {
     private final Map<Type, org.apache.avro.Schema> typeToSchema;
     private final Random random;
@@ -289,6 +305,34 @@ public class RandomData {
     @Override
     public Object primitive(Type.PrimitiveType primitive) {
       return generatePrimitive(primitive, random);
+    }
+  }
+
+  private static class FallbackDictionaryEncodedDataGenerator extends RandomDataGenerator {
+
+    private final int numRecords;
+    private final float fraction;
+    private int current;
+
+    private FallbackDictionaryEncodedDataGenerator(Schema schema, long seed, int numRecords, float fraction) {
+      super(schema, seed);
+      this.numRecords = numRecords;
+      this.fraction = fraction;
+    }
+
+    @Override
+    public Object primitive(Type.PrimitiveType primitive) {
+      switch (primitive.typeId()) {
+        case STRING:
+          if (current < fraction * numRecords) {
+            current++;
+            return "ABC";
+          } else {
+            current++;
+            return super.primitive(primitive);
+          }
+      }
+      return super.primitive(primitive);
     }
   }
 
