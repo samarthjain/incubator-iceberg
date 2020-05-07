@@ -392,6 +392,11 @@ project(':iceberg-spark') {
       exclude group: 'org.apache.avro', module: 'avro'
     }
   }
+  test {
+    // For vectorized reads
+    systemProperty("arrow.enable_unsafe_memory_access", "true")
+    systemProperty("arrow.enable_null_check_for_get", "false")
+  }
 }
 
 project(':iceberg-pig') {
